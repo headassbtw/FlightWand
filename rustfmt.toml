@@ -1,0 +1,7 @@
+blank_lines_upper_bound = 1
+# i have an ultrawide, and this is my project. fuck you.
+max_width = 120
+single_line_if_else_max_width = 100
+single_line_let_else_max_width = 100
+use_small_heuristics = "Max"
+fn_single_line = true
