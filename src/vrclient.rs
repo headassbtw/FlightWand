@@ -4,7 +4,7 @@ use ash::vk::{self, Handle};
 use evdev::uinput::VirtualDevice;
 use evdev::{AbsInfo, AbsoluteAxisCode, AttributeSet, AttributeSetRef, InputEvent, KeyCode, UinputAbsSetup};
 use openxr as xr;
-use openxr::{Fovf, Posef};
+use openxr::{Fovf, Instance, Posef};
 use std::{
     io,
     sync::{
@@ -26,6 +26,10 @@ struct Swapchain {
 
 /// Maximum number of frames in flight
 const PIPELINE_DEPTH: u32 = 2;
+const NE: f32 = 0.25;
+const NW: f32 = -0.25;
+const SE: f32 = 0.75;
+const SW: f32 = -0.75;
 
 pub struct VRClient {}
 
@@ -183,9 +187,8 @@ impl VRClient {
                         std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
                         &vk::InstanceCreateInfo::default().application_info(&vk_app_info) as *const _ as *const _,
                     )
-                )
-                .map_err(vk::Result::from_raw)
-                .expect("Vulkan error creating Vulkan instance");
+                );
+                let vk_instance = vk_unwrap!(tx, vk_instance.map_err(vk::Result::from_raw));
                 ash::Instance::load(vk_entry.static_fn(), vk::Instance::from_raw(vk_instance as _))
             };
 
@@ -211,31 +214,35 @@ impl VRClient {
                     } else {
                         None
                     }
-                })
-                .expect("Vulkan device has no graphics queue");
-
-            let vk_device = {
-                let vk_device = xr_unwrap!(
-                    tx,
-                    xr_instance.create_vulkan_device(
-                        system,
-                        std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
-                        vk_physical_device.as_raw() as _,
-                        &vk::DeviceCreateInfo::default()
-                            .queue_create_infos(&[vk::DeviceQueueCreateInfo::default()
-                                .queue_family_index(queue_family_index)
-                                .queue_priorities(&[1.0])])
-                            .push_next(&mut vk::PhysicalDeviceMultiviewFeatures {
-                                multiview: vk::TRUE,
-                                ..Default::default()
-                            }) as *const _ as *const _,
-                    )
-                )
-                .map_err(vk::Result::from_raw)
-                .expect("Vulkan error creating Vulkan device");
-
-                ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(vk_device as _))
+                });
+            let queue_family_index = match queue_family_index {
+                Some(index) => index,
+                None => {
+                    let _ = tx.send(VR2UI::Failure(VRSystemFailure::VulkanUnavailable));
+                    return;
+                }
             };
+
+            let vk_device = xr_unwrap!(
+                tx,
+                xr_instance.create_vulkan_device(
+                    system,
+                    std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
+                    vk_physical_device.as_raw() as _,
+                    &vk::DeviceCreateInfo::default()
+                        .queue_create_infos(&[vk::DeviceQueueCreateInfo::default()
+                            .queue_family_index(queue_family_index)
+                            .queue_priorities(&[1.0])])
+                        .push_next(&mut vk::PhysicalDeviceMultiviewFeatures {
+                            multiview: vk::TRUE,
+                            ..Default::default()
+                        }) as *const _ as *const _,
+                )
+            )
+            .map_err(vk::Result::from_raw);
+            let vk_device = vk_unwrap!(tx, vk_device);
+
+            let vk_device = { ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(vk_device as _)) };
 
             let queue = vk_device.get_device_queue(queue_family_index, 0);
 
@@ -250,7 +257,7 @@ impl VRClient {
                 },)
             );
 
-            let hand;
+            let hand: &str;
             'wait_for_startup: loop {
                 while let Ok(msg) = rx.try_recv() {
                     match msg {
@@ -489,23 +496,14 @@ impl VRClient {
                     );
                     let act = distance > 0.35 && trackpad_click.current_state;
 
-                    let ev_north = InputEvent::new(
-                        1,
-                        KeyCode::BTN_NORTH.0,
-                        if (ang < 0.25 && ang > -0.25) && act { 1 } else { 0 },
-                    );
+                    let ev_north =
+                        InputEvent::new(1, KeyCode::BTN_NORTH.0, if (ang < NE && ang > NW) && act { 1 } else { 0 });
                     let ev_east =
-                        InputEvent::new(1, KeyCode::BTN_EAST.0, if (ang < 0.75 && ang > 0.25) && act { 1 } else { 0 });
-                    let ev_west = InputEvent::new(
-                        1,
-                        KeyCode::BTN_WEST.0,
-                        if (ang < -0.25 && ang > -0.75) && act { 1 } else { 0 },
-                    );
-                    let ev_south = InputEvent::new(
-                        1,
-                        KeyCode::BTN_SOUTH.0,
-                        if (ang < -0.75 || ang > 0.75) && act { 1 } else { 0 },
-                    );
+                        InputEvent::new(1, KeyCode::BTN_EAST.0, if (ang < SE && ang > NE) && act { 1 } else { 0 });
+                    let ev_west =
+                        InputEvent::new(1, KeyCode::BTN_WEST.0, if (ang < NW && ang > SW) && act { 1 } else { 0 });
+                    let ev_south =
+                        InputEvent::new(1, KeyCode::BTN_SOUTH.0, if (ang < SW || ang > SE) && act { 1 } else { 0 });
 
                     let ev_start = InputEvent::new(1, KeyCode::BTN_START.0, if menu.current_state { 1 } else { 0 });
                     let ev_grip = InputEvent::new(1, KeyCode::BTN_TR2.0, if grip.current_state { 1 } else { 0 });

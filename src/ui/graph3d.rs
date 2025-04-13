@@ -1,4 +1,5 @@
 use eframe::egui_glow;
+use eframe::glow::NativeShader;
 use egui::{Align2, Color32, FontId, Rounding, mutex::Mutex};
 use egui_glow::glow;
 use nalgebra_glm::TVec3;
@@ -55,6 +56,18 @@ const FRAGMENT_SHADER_SOURCE: &str = r#"
     }
 "#;
 
+macro_rules! gl_unwrap {
+    ($result:expr) => {
+        match $result {
+            core::result::Result::Ok(val) => val,
+            core::result::Result::Err(err) => {
+                log::error!("{:?}", err);
+                return None;
+            }
+        }
+    };
+}
+
 impl GFX {
     pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Option<Arc<Mutex<Self>>> {
         unsafe {
@@ -63,43 +76,39 @@ impl GFX {
 
             let shader_version = egui_glow::ShaderVersion::get(gl);
 
-            let program = gl.create_program().expect("Cannot create program");
+            let program = gl_unwrap!(gl.create_program());
 
             if !shader_version.is_new_shader_interface() {
                 log::warn!("Custom 3D painting hasn't been ported to {:?}", shader_version);
                 return None;
             }
 
-            let shader_sources =
-                [(glow::VERTEX_SHADER, VERTEX_SHADER_SOURCE), (glow::FRAGMENT_SHADER, FRAGMENT_SHADER_SOURCE)];
-
-            let shaders: Vec<_> = shader_sources
-                .iter()
-                .map(|(shader_type, shader_source)| {
-                    let shader = gl.create_shader(*shader_type).expect("Cannot create shader");
-                    gl.shader_source(shader, &format!("{}\n{}", shader_version.version_declaration(), shader_source));
-                    gl.compile_shader(shader);
-                    assert!(
-                        gl.get_shader_compile_status(shader),
-                        "Failed to compile custom_3d_glow {shader_type}: {}",
-                        gl.get_shader_info_log(shader)
-                    );
-
-                    gl.attach_shader(program, shader);
-                    shader
-                })
-                .collect();
-
+            let vs = gl_unwrap!(gl.create_shader(glow::VERTEX_SHADER));
+            gl.shader_source(vs, &format!("{}\n{}", shader_version.version_declaration(), VERTEX_SHADER_SOURCE));
+            gl.compile_shader(vs);
+            if !gl.get_shader_compile_status(vs) {
+                log::error!("Failed to compile vertex shader: {:?}", gl.get_shader_info_log(vs));
+                return None;
+            }
+            gl.attach_shader(program, vs);
+            let fs = gl_unwrap!(gl.create_shader(glow::FRAGMENT_SHADER));
+            gl.shader_source(fs, &format!("{}\n{}", shader_version.version_declaration(), FRAGMENT_SHADER_SOURCE));
+            gl.compile_shader(fs);
+            if !gl.get_shader_compile_status(fs) {
+                log::error!("Failed to compile fragment shader: {:?}", gl.get_shader_info_log(fs));
+                return None;
+            }
+            gl.attach_shader(program, fs);
             gl.link_program(program);
             assert!(gl.get_program_link_status(program), "{}", gl.get_program_info_log(program));
 
-            for shader in shaders {
-                gl.detach_shader(program, shader);
-                gl.delete_shader(shader);
-            }
+            gl.detach_shader(program, vs);
+            gl.delete_shader(vs);
+            gl.detach_shader(program, fs);
+            gl.delete_shader(fs);
 
-            let vertex_array = gl.create_vertex_array().expect("Cannot create vertex array");
-            let vertex_buffer = gl.create_buffer().expect("Cannot create vertex buffer");
+            let vertex_array = gl_unwrap!(gl.create_vertex_array());
+            let vertex_buffer = gl_unwrap!(gl.create_buffer());
 
             gl.bind_vertex_array(Some(vertex_array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
