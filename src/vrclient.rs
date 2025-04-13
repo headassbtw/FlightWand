@@ -85,11 +85,8 @@ impl VRClient {
         });
     }
     async fn run1(tx: std::sync::mpsc::Sender<VR2UI>, rx: std::sync::mpsc::Receiver<UI2VR>) {
-        let mut offsets: [f32; 3] = [0.0; 3];
         let mut identity: [f32; 3] = [0.0; 3];
         identity[2] = -1.0;
-        offsets[0] = -0.18;
-        offsets[2] = -0.35;
         let abs_setup = AbsInfo::new(0, -100, 100, 0, 0, 200);
 
         let axis_x = UinputAbsSetup::new(AbsoluteAxisCode::ABS_X, abs_setup);
@@ -415,9 +412,6 @@ impl VRClient {
                 while let Ok(ev) = rx.try_recv() {
                     match ev {
                         UI2VR::Shutdown => break 'main_loop,
-                        UI2VR::UpdateOffsets(new_offsets) => {
-                            offsets = new_offsets;
-                        }
                         UI2VR::UpdateIdentity(new_id) => {
                             identity = new_id;
                         }

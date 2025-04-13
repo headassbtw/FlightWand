@@ -24,7 +24,6 @@ pub struct UI {
     graph3d: Graph3D,
     graph: [[f32; 4]; 100],
     id_mod: [f32; 3],
-    offsets: [f32; 3],
 }
 
 impl UI {
@@ -34,10 +33,7 @@ impl UI {
         cc: &eframe::CreationContext,
     ) -> Self {
         let mut id_mod = [0.0; 3];
-        let mut offsets = [0.0; 3];
         id_mod[2] = -1.0;
-        offsets[0] = -0.18;
-        offsets[2] = -0.35;
 
         cc.egui_ctx.style_mut(|style| {
             for (style, font) in &mut style.text_styles {
@@ -65,7 +61,6 @@ impl UI {
             startup_failure: None,
             runtime_failure: None,
             graph: [[0.0; 4]; 100],
-            offsets,
             id_mod,
             graph3d: Graph3D::new(cc),
         }
@@ -162,31 +157,31 @@ impl eframe::App for UI {
                 }
             }
 
-            ui.label("Offset/Centering: ");
+            ui.label("Up: ");
             ui.horizontal(|ui| {
                 ui.spacing_mut().slider_width = (ui.available_width() - ui.spacing().item_spacing.x * 2.0) / 3.0;
                 ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::RED;
-                let x_changed = Slider::new(&mut self.offsets[0], -1.0..=1.0).show_value(false).ui(ui).changed();
+                let x_changed = Slider::new(&mut self.id_mod[0], -1.0..=1.0).show_value(false).ui(ui).changed();
                 ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::GREEN;
-                let y_changed = Slider::new(&mut self.offsets[1], -1.0..=1.0).show_value(false).ui(ui).changed();
+                let y_changed = Slider::new(&mut self.id_mod[1], -1.0..=1.0).show_value(false).ui(ui).changed();
                 ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::BLUE;
-                let z_changed = Slider::new(&mut self.offsets[2], -1.0..=1.0).show_value(false).ui(ui).changed();
+                let z_changed = Slider::new(&mut self.id_mod[2], -1.0..=1.0).show_value(false).ui(ui).changed();
 
                 if x_changed || y_changed || z_changed {
-                    let _ = self.tx.send(UI2VR::UpdateOffsets(self.offsets));
+                    let _ = self.tx.send(UI2VR::UpdateIdentity(self.id_mod));
                 }
             });
             ui.horizontal(|ui| {
                 ui.spacing_mut().interact_size.x = (ui.available_width() - ui.spacing().item_spacing.x * 2.0) / 3.0;
                 ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::RED;
-                let x_changed = DragValue::new(&mut self.offsets[0]).range(-1.0..=1.0).ui(ui).changed();
+                let x_changed = DragValue::new(&mut self.id_mod[0]).range(-1.0..=1.0).ui(ui).changed();
                 ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::GREEN;
-                let y_changed = DragValue::new(&mut self.offsets[1]).range(-1.0..=1.0).ui(ui).changed();
+                let y_changed = DragValue::new(&mut self.id_mod[1]).range(-1.0..=1.0).ui(ui).changed();
                 ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::BLUE;
-                let z_changed = DragValue::new(&mut self.offsets[2]).range(-1.0..=1.0).ui(ui).changed();
+                let z_changed = DragValue::new(&mut self.id_mod[2]).range(-1.0..=1.0).ui(ui).changed();
 
                 if x_changed || y_changed || z_changed {
-                    let _ = self.tx.send(UI2VR::UpdateOffsets(self.offsets));
+                    let _ = self.tx.send(UI2VR::UpdateIdentity(self.id_mod));
                 }
             });
 

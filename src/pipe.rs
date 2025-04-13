@@ -22,8 +22,6 @@ pub enum UI2VR {
     Shutdown,
     /// Starts OpenXR.
     Start(Hand),
-    /// Deprecated. Used to offset the raw value before I figured out quaternions.
-    UpdateOffsets([f32; 3]),
     /// Updates the backend's knowledge of "up"
     UpdateIdentity([f32; 3]),
 }

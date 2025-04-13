@@ -10,5 +10,5 @@ utilizing OpenXR and evdev
 # To-Do
 * Support other controllers (This is theoretically trivial)
 * Handle other errors more gracefully
-* Expose more settings in a user-friendly way (offsets, centering, etc)
+* Expose more settings in a user-friendly way (centering, etc)
 * 3D wireframe flightstick :D
