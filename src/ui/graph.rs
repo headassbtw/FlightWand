@@ -1,7 +1,7 @@
 use eframe::epaint::{Color32, Rounding, Stroke};
 use egui::{pos2, vec2};
 
-pub fn graph(items: &[[f32; 4]], ui: &mut egui::Ui, modifier: impl Fn(&[f32; 4]) -> [f32; 4]) -> egui::Response {
+pub fn graph(items: &[[f32; 4]], up: [f32; 3], ui: &mut egui::Ui, modifier: impl Fn(&[f32; 4], [f32; 3]) -> [f32; 4]) -> egui::Response {
     let height = ui.spacing().interact_size.y * 10.0;
 
     let (rect, response) =
@@ -16,8 +16,8 @@ pub fn graph(items: &[[f32; 4]], ui: &mut egui::Ui, modifier: impl Fn(&[f32; 4])
 
     let mut i: usize = 1;
     while i < items.len() {
-        let item0 = modifier(&items[i - 1]);
-        let item1 = modifier(&items[i]);
+        let item0 = modifier(&items[i - 1], up);
+        let item1 = modifier(&items[i], up);
         let x0 = ((item0[0] + 1.0) / 2.0) * height;
         let y0 = ((item0[1] + 1.0) / 2.0) * height;
         let z0 = ((item0[2] + 1.0) / 2.0) * height;

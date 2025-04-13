@@ -507,7 +507,7 @@ impl VRClient {
                         pose.pose.orientation.y,
                         pose.pose.orientation.z,
                         pose.pose.orientation.w,
-                    ]);
+                    ], identity);
 
                     // rustfmt refuses to let me just "if bigger then big" so i have to set it! thanks!
                     rot[0] = if rot[0] > 1.0 { 1.0 } else { rot[0] };

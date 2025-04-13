@@ -32,8 +32,7 @@ impl UI {
         rx: std::sync::mpsc::Receiver<VR2UI>,
         cc: &eframe::CreationContext,
     ) -> Self {
-        let mut id_mod = [0.0; 3];
-        id_mod[2] = -1.0;
+        let mut id_mod = [0.0, 0.6, -1.0];
 
         cc.egui_ctx.style_mut(|style| {
             for (style, font) in &mut style.text_styles {
@@ -189,11 +188,11 @@ impl eframe::App for UI {
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                 let mut i = 0;
                 while i < self.graph.len() {
-                    buffer[i] = util::modifier(&self.graph[i]);
+                    buffer[i] = util::modifier(&self.graph[i], self.id_mod);
                     i += 1;
                 }
                 self.graph3d.draw(&buffer, ui);
-                graph::graph(&self.graph, ui, util::modifier);
+                graph::graph(&self.graph, self.id_mod, ui, util::modifier);
             });
         });
     }
