@@ -4,7 +4,7 @@ use ash::vk::{self, Handle};
 use evdev::uinput::VirtualDevice;
 use evdev::{AbsInfo, AbsoluteAxisCode, AttributeSet, AttributeSetRef, InputEvent, KeyCode, UinputAbsSetup};
 use openxr as xr;
-use openxr::{Fovf, Instance, Posef};
+use openxr::{Fovf, Posef};
 use std::{
     io,
     sync::{
@@ -238,10 +238,8 @@ impl VRClient {
                             ..Default::default()
                         }) as *const _ as *const _,
                 )
-            )
-            .map_err(vk::Result::from_raw);
-            let vk_device = vk_unwrap!(tx, vk_device);
-
+            );
+            let vk_device = vk_unwrap!(tx, vk_device.map_err(vk::Result::from_raw));
             let vk_device = { ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(vk_device as _)) };
 
             let queue = vk_device.get_device_queue(queue_family_index, 0);

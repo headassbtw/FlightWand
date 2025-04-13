@@ -1,5 +1,4 @@
 use eframe::egui_glow;
-use eframe::glow::NativeShader;
 use egui::{Align2, Color32, FontId, Rounding, mutex::Mutex};
 use egui_glow::glow;
 use nalgebra_glm::TVec3;

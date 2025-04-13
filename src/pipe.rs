@@ -69,7 +69,7 @@ impl Display for VRSystemFailure {
             VRSystemFailure::Generic(res) => write!(f, "OpenXR failure:\n{}", res),
             VRSystemFailure::Vulkan(res) => write!(f, "Vulkan failure:\n{:?}", res),
             VRSystemFailure::VulkanMismatch => write!(f, "Your system does not support Vulkan 1.1."),
-            VRSystemFailure::VulkanUnavailable => write!(f, "Vulkan unavailable."),
+            VRSystemFailure::VulkanUnavailable => write!(f, "The system does not have a usable Vulkan implementation."),
             VRSystemFailure::VulkanLoader(err) => write!(f, "Vulkan loader failure: {:?}", err),
         }
     }
