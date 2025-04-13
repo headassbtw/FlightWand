@@ -35,14 +35,14 @@ pub struct VRSystemInformation {
 pub enum VRSystemFailure {
     /// Couldn't initialize the virtual gamepad.
     // TODO: add the error that evdev throws
-    VirtualGamepad,
+    VirtualGamepad(std::io::Error),
     /// Couldn't start OpenXR.
     // TODO: add the error that OpenXR throws
-    EntryCreation,
+    EntryCreation(openxr::LoadError),
     /// OpenXR couldn't finish starting up.
     Generic(openxr::sys::Result),
     /// Vulkan creation error.
-    Vulkan(openxr::sys::platform::VkResult),
+    Vulkan(ash::vk::Result),
     /// The system does not have a usable Vulkan implementation.
     VulkanUnavailable,
     /// The system does not support Vulkan 1.1
@@ -57,40 +57,20 @@ pub enum VRSystemFailure {
 impl Display for VRSystemFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VRSystemFailure::VirtualGamepad => {
-                write!(f, "Couldn't initialize the virtual gamepad.")
+            VRSystemFailure::VirtualGamepad(err) => {
+                write!(f, "Virtual gamepad error.\n{:?}", err)
             }
-            VRSystemFailure::EntryCreation => {
-                write!(f, "Failed to create OpenXR entry.")
+            VRSystemFailure::EntryCreation(err) => {
+                write!(f, "Failed to create OpenXR entry.\n\nAdvanced: {:?}", err)
             }
             VRSystemFailure::RotationUnavailable => {
                 write!(f, "The selected VR system does not support rotational tracking.")
             }
-            VRSystemFailure::Generic(res) => match *res {
-                openxr::sys::Result::ERROR_RUNTIME_UNAVAILABLE => {
-                    write!(f, "OpenXR runtime unavailable.")
-                }
-                openxr::sys::Result::ERROR_RUNTIME_FAILURE => {
-                    write!(f, "OpenXR runtime failure.")
-                }
-                _ => {
-                    write!(f, "Other: {:?}", res)
-                }
-            },
-            VRSystemFailure::Vulkan(res) => match *res {
-                _ => {
-                    write!(f, "Vulkan failure: {:?}", res)
-                }
-            },
-            VRSystemFailure::VulkanMismatch => {
-                write!(f, "Your system does not support Vulkan 1.1.")
-            }
-            VRSystemFailure::VulkanUnavailable => {
-                write!(f, "Vulkan unavailable.")
-            }
-            VRSystemFailure::VulkanLoader(err) => {
-                write!(f, "Vulkan loader failure: {:?}", err)
-            }
+            VRSystemFailure::Generic(res) => write!(f, "OpenXR failure:\n{}", res),
+            VRSystemFailure::Vulkan(res) => write!(f, "Vulkan failure:\n{:?}", res),
+            VRSystemFailure::VulkanMismatch => write!(f, "Your system does not support Vulkan 1.1."),
+            VRSystemFailure::VulkanUnavailable => write!(f, "Vulkan unavailable."),
+            VRSystemFailure::VulkanLoader(err) => write!(f, "Vulkan loader failure: {:?}", err),
         }
     }
 }

@@ -71,9 +71,11 @@ impl UI {
         }
     }
 
-    pub fn run(tx: std::sync::mpsc::Sender<UI2VR>, rx: std::sync::mpsc::Receiver<VR2UI>) {
-        eframe::run_native("FlightWand", Default::default(), Box::new(|cc| Ok(Box::new(UI::new(tx, rx, cc))))).unwrap();
+    pub fn run(tx: std::sync::mpsc::Sender<UI2VR>, rx: std::sync::mpsc::Receiver<VR2UI>) -> eframe::Result<()> {
+        let rtn =
+            eframe::run_native("FlightWand", Default::default(), Box::new(|cc| Ok(Box::new(UI::new(tx, rx, cc)))));
         info!("Frontend stopped");
+        rtn
     }
 }
 

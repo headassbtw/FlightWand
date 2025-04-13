@@ -1,11 +1,11 @@
 use eframe::egui_glow;
-use egui::{Color32, Rounding, mutex::Mutex};
+use egui::{Align2, Color32, FontId, Rounding, mutex::Mutex};
 use egui_glow::glow;
 use nalgebra_glm::TVec3;
 use std::sync::Arc;
 
 pub struct Graph3D {
-    gfx: Arc<Mutex<GFX>>,
+    gfx: Option<Arc<Mutex<GFX>>>,
     angle: (f32, f32),
 }
 
@@ -56,7 +56,7 @@ const FRAGMENT_SHADER_SOURCE: &str = r#"
 "#;
 
 impl GFX {
-    pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Option<Self> {
+    pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Option<Arc<Mutex<Self>>> {
         unsafe {
             let gl = cc.gl.as_ref()?;
             use glow::HasContext as _;
@@ -109,9 +109,8 @@ impl GFX {
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             gl.bind_vertex_array(None);
 
-            Some(Self { program, vertex_array, vertex_buffer })
+            Some(Arc::new(Mutex::new(Self { program, vertex_array, vertex_buffer })))
         }
-
     }
 
     fn paint(&self, gl: &glow::Context, angle: (f32, f32), buffer: [[f32; 4]; 100]) {
@@ -165,22 +164,32 @@ impl GFX {
 }
 
 impl Graph3D {
-    pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Self {
-        Self { gfx: Arc::new(Mutex::new(GFX::new(cc).unwrap())), angle: (0.0, 0.0) }
-    }
+    pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Self { Self { gfx: GFX::new(cc), angle: (0.0, 0.0) } }
 
     pub fn draw(&mut self, buffer: &[[f32; 4]; 100], ui: &mut egui::Ui) {
         let (rect, response) =
             ui.allocate_exact_size(egui::Vec2::splat(ui.spacing().interact_size.y * 10.0), egui::Sense::drag());
 
-        self.angle.0 += response.drag_motion().x * 0.01;
-        self.angle.1 += response.drag_motion().y * 0.01;
-
         ui.painter().rect(rect, Rounding::ZERO, Color32::BLACK, ui.visuals().noninteractive().bg_stroke);
 
+        let gfx = match self.gfx.clone() {
+            Some(gfx) => gfx,
+            None => {
+                ui.painter().text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    "Unavailable",
+                    FontId::proportional(ui.spacing().interact_size.y),
+                    Color32::WHITE,
+                );
+                return;
+            }
+        };
+
+        self.angle.0 += response.drag_motion().x * 0.01;
+        self.angle.1 += response.drag_motion().y * 0.01;
         // Clone locals so we can move them into the paint callback:
         let angle = self.angle;
-        let gfx = self.gfx.clone();
         let buffer = buffer.clone();
         let cb = egui_glow::CallbackFn::new(move |_info, painter| {
             gfx.lock().paint(painter.gl(), angle, buffer);
