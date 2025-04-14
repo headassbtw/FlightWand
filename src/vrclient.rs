@@ -1,4 +1,4 @@
-use crate::pipe::{Hand, UI2VR, VR2UI, VRSystemFailure, VRSystemInformation};
+use crate::pipe::{Hand, UI2VR, VR2UI, VRInputBounds, VRSystemFailure, VRSystemInformation};
 use crate::util;
 use ash::vk::{self, Handle};
 use evdev::uinput::VirtualDevice;
@@ -100,8 +100,9 @@ impl VRClient {
     }
 
     fn run_internal(tx: std::sync::mpsc::Sender<VR2UI>, rx: std::sync::mpsc::Receiver<UI2VR>) {
-        let mut identity: [f32; 3] = [-0.02, 0.61, -1.0];
-        let abs_setup = AbsInfo::new(0, -100, 100, 0, 0, 500);
+        let mut identity: [f32; 3] = [-0.02, 0.2, -1.0];
+        let mut bounds = VRInputBounds::default();
+        let abs_setup = AbsInfo::new(0, i16::MIN.into(), i16::MAX.into(), 0, 0, i16::MAX.into());
 
         let axis_x = UinputAbsSetup::new(AbsoluteAxisCode::ABS_X, abs_setup);
         let axis_y = UinputAbsSetup::new(AbsoluteAxisCode::ABS_Y, abs_setup);
@@ -448,6 +449,9 @@ impl VRClient {
                         UI2VR::UpdateIdentity(new_id) => {
                             identity = new_id;
                         }
+                        UI2VR::UpdateBounds(new_bounds) => {
+                            bounds = new_bounds;
+                        }
                         _ => {}
                     }
                 }
@@ -521,29 +525,30 @@ impl VRClient {
                     let ev_grip = InputEvent::new(1, KeyCode::BTN_TR2.0, if grip.current_state { 1 } else { 0 });
 
                     io_unwrap!(tx, device.emit(&[ev_north, ev_east, ev_west, ev_south, ev_start, ev_grip]));
-
-                    let mut rot = util::modifier(
-                        &[
-                            pose.pose.orientation.x,
-                            pose.pose.orientation.y,
-                            pose.pose.orientation.z,
-                            pose.pose.orientation.w,
-                        ],
-                        identity,
-                    );
-
-                    // rustfmt refuses to let me just "if bigger then big" so i have to set it! thanks!
-                    rot[0] = if rot[0] > 1.0 { 1.0 } else { rot[0] };
-                    rot[0] = if rot[0] < -1.0 { -1.0 } else { rot[0] };
-                    rot[2] = if rot[2] > 1.0 { 1.0 } else { rot[2] };
-                    rot[2] = if rot[2] < -1.0 { -1.0 } else { rot[2] };
-
-                    let ev_x = InputEvent::new(3, AbsoluteAxisCode::ABS_X.0, (f32::sin(rot[0]) * 100.0) as i32);
-                    let ev_y = InputEvent::new(3, AbsoluteAxisCode::ABS_Y.0, (f32::sin(-rot[2]) * 100.0) as i32);
-                    let _ev_t = InputEvent::new(3, AbsoluteAxisCode::ABS_GAS.0, (trigger.current_state * 100.0) as i32);
-
-                    io_unwrap!(tx, device.emit(&[ev_x, ev_y]));
                 }
+
+                let rot = util::modifier(
+                    &[
+                        pose.pose.orientation.x,
+                        pose.pose.orientation.y,
+                        pose.pose.orientation.z,
+                        pose.pose.orientation.w,
+                    ],
+                    identity,
+                );
+
+                let [x, y] = util::rot_to_joy(&[rot[0], rot[2]], bounds);
+                let length = f32::sqrt(x * x + y * y);
+
+                let x = if length < bounds.deadzone { 0.0 } else { x / bounds.stick_max * i16::MAX as f32 };
+                let y = if length < bounds.deadzone { 0.0 } else { y / bounds.stick_max * i16::MAX as f32 };
+
+                let ev_x = InputEvent::new(3, AbsoluteAxisCode::ABS_X.0, x as i32);
+                let ev_y = InputEvent::new(3, AbsoluteAxisCode::ABS_Y.0, y as i32);
+                let _ev_t =
+                    InputEvent::new(3, AbsoluteAxisCode::ABS_GAS.0, (trigger.current_state * i16::MAX as f32) as i32);
+
+                io_unwrap!(tx, device.emit(&[ev_x, ev_y]));
 
                 // Wait until the image is available to render to before beginning work on the GPU. The
                 // compositor could still be reading from it.

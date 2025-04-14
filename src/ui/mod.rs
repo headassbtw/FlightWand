@@ -8,7 +8,8 @@ use crate::{
 };
 use eframe::{emath::Align, epaint::Stroke};
 use egui::{
-    Color32, FontData, FontDefinitions, FontFamily, Layout, TextStyle, Widget, vec2,
+    Color32, FontData, FontDefinitions, FontFamily, FontId, Id, LayerId, Layout, Order, Rounding, TextStyle, Widget,
+    vec2,
     widgets::{DragValue, Slider},
 };
 use log::info;
@@ -34,7 +35,7 @@ impl UI {
         rx: std::sync::mpsc::Receiver<VR2UI>,
         cc: &eframe::CreationContext,
     ) -> Self {
-        let id_mod = [0.0, 0.6, -1.0];
+        let id_mod = [0.0, 0.2, -1.0];
 
         cc.egui_ctx.style_mut(|style| {
             for (style, font) in &mut style.text_styles {
@@ -77,6 +78,137 @@ impl UI {
 }
 
 #[profiling::all_functions]
+impl UI {
+    fn main_content(&mut self, ui: &mut egui::Ui) {
+        ui.label("Up: ");
+        ui.horizontal(|ui| {
+            ui.spacing_mut().slider_width = (ui.available_width() - ui.spacing().item_spacing.x * 2.0) / 3.0;
+            ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::RED;
+            let x_changed = Slider::new(&mut self.id_mod[0], -1.0..=1.0).show_value(false).ui(ui).changed();
+            ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::GREEN;
+            let y_changed = Slider::new(&mut self.id_mod[1], -1.0..=1.0).show_value(false).ui(ui).changed();
+            ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::BLUE;
+            let z_changed = Slider::new(&mut self.id_mod[2], -1.0..=1.0).show_value(false).ui(ui).changed();
+
+            if x_changed || y_changed || z_changed {
+                let _ = self.tx.send(UI2VR::UpdateIdentity(self.id_mod));
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.spacing_mut().interact_size.x = (ui.available_width() - ui.spacing().item_spacing.x * 2.0) / 3.0;
+            ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::RED;
+            let x_changed = DragValue::new(&mut self.id_mod[0]).range(-1.0..=1.0).ui(ui).changed();
+            ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::GREEN;
+            let y_changed = DragValue::new(&mut self.id_mod[1]).range(-1.0..=1.0).ui(ui).changed();
+            ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::BLUE;
+            let z_changed = DragValue::new(&mut self.id_mod[2]).range(-1.0..=1.0).ui(ui).changed();
+
+            if x_changed || y_changed || z_changed {
+                let _ = self.tx.send(UI2VR::UpdateIdentity(self.id_mod));
+            }
+        });
+
+        ui.label("Current rotation: ");
+        let mut buffer: [[f32; 4]; 100] = [[0.0; 4]; 100];
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+            profiling::scope!("Rotation visualization");
+            let mut i = 0;
+            while i < self.graph.len() {
+                profiling::scope!(&format!("data point {}", i));
+                buffer[i] = util::modifier(&self.graph[i], self.id_mod);
+                i += 1;
+            }
+            self.graph3d.draw(&buffer, ui);
+            graph::graph(&buffer, self.id_mod, ui, |a, _| *a);
+        });
+
+        ui.label("Gamepad output: ");
+        if ui
+            .add_sized(
+                vec2(ui.available_width(), ui.spacing().interact_size.y),
+                Slider::new(&mut self.stick_bounds.deadzone, 0.0..=1.0).text("Deadzone"),
+            )
+            .changed()
+            || ui
+                .add_sized(
+                    vec2(ui.available_width(), ui.spacing().interact_size.y),
+                    Slider::new(&mut self.stick_bounds.stick_max, 0.0..=1.0).text("Maximum"),
+                )
+                .changed()
+        {
+            let _ = self.tx.send(UI2VR::UpdateBounds(self.stick_bounds.clone()));
+        }
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+            profiling::scope!("final joystick visualization");
+            let mut i = 0;
+            while i < self.graph.len() {
+                profiling::scope!(&format!("data point {}", i));
+                let tmp = util::modifier(&self.graph[i], self.id_mod);
+                let [x, y] = util::rot_to_joy(&[tmp[0], tmp[2]], self.stick_bounds);
+
+                buffer[i] = [x, y, -2.0, 2.0];
+                i += 1;
+            }
+
+            let (rect, _) =
+                ui.allocate_exact_size(egui::Vec2::splat(ui.spacing().interact_size.y * 10.0), egui::Sense::click());
+
+            ui.painter().circle(
+                rect.center(),
+                rect.width() / 2.0,
+                Color32::BLACK,
+                ui.visuals().noninteractive().bg_stroke,
+            );
+            ui.painter()
+                .line_segment([rect.left_center(), rect.right_center()], ui.visuals().noninteractive().bg_stroke);
+            ui.painter()
+                .line_segment([rect.center_top(), rect.center_bottom()], ui.visuals().noninteractive().bg_stroke);
+            ui.painter().circle(
+                rect.center(),
+                (rect.width() / 2.0) * self.stick_bounds.deadzone,
+                Color32::TRANSPARENT,
+                Stroke::new(1.0, Color32::from_rgb(0, 128, 200)),
+            );
+            ui.painter().circle(
+                rect.center(),
+                (rect.width() / 2.0) * self.stick_bounds.stick_max,
+                Color32::TRANSPARENT,
+                Stroke::new(1.0, Color32::GOLD),
+            );
+            let plt_x = buffer[99][0] * rect.width() / 2.0;
+            let plt_y = 0.0 - buffer[99][1] * rect.width() / 2.0;
+
+            ui.painter().circle_filled(rect.center() + vec2(plt_x, plt_y), 4.0, Color32::WHITE);
+
+            graph::graph(&buffer, self.id_mod, ui, |a, _| {
+                let length = f32::sqrt(a[0] * a[0] + a[1] * a[1]);
+
+                let x = if length < self.stick_bounds.deadzone { 0.0 } else { a[0] / self.stick_bounds.stick_max };
+                let y = if length < self.stick_bounds.deadzone { 0.0 } else { a[1] / self.stick_bounds.stick_max };
+
+                [x, y, a[2], a[3]]
+            });
+        });
+    }
+
+    fn render_failure(&self, ctx: &eframe::egui::Context, failure: &VRSystemFailure) {
+        let rect = ctx.screen_rect().shrink2(vec2(0.0, (ctx.screen_rect().height() / 2.0) - 100.0));
+
+        let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("FailureMessage")));
+
+        painter.rect_filled(rect, Rounding::ZERO, Color32::from_rgba_unmultiplied(128, 0, 0, 16));
+
+        painter.line_segment([rect.min, rect.right_top()], Stroke::new(2.0, Color32::RED));
+        painter.line_segment([rect.max, rect.left_bottom()], Stroke::new(2.0, Color32::RED));
+
+        let err =
+            painter.layout(format!("{}", failure), FontId::proportional(24.0), Color32::WHITE, rect.width() * 0.75);
+
+        painter.galley(rect.center() - err.rect.size() / 2.0, err, Color32::WHITE);
+    }
+}
+
+#[profiling::all_functions]
 impl eframe::App for UI {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint();
@@ -107,15 +239,7 @@ impl eframe::App for UI {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            if let Some(failure) = &self.startup_failure {
-                ui.scope(|ui| {
-                    ui.heading(egui::RichText::from("Startup Failed").color(Color32::RED));
-
-                    ui.separator();
-
-                    ui.label(format!("{}", failure));
-                });
-
+            if self.startup_failure.is_some() {
                 return;
             }
 
@@ -160,98 +284,21 @@ impl eframe::App for UI {
                 }
             }
 
-            ui.label("Up: ");
-            ui.horizontal(|ui| {
-                ui.spacing_mut().slider_width = (ui.available_width() - ui.spacing().item_spacing.x * 2.0) / 3.0;
-                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::RED;
-                let x_changed = Slider::new(&mut self.id_mod[0], -1.0..=1.0).show_value(false).ui(ui).changed();
-                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::GREEN;
-                let y_changed = Slider::new(&mut self.id_mod[1], -1.0..=1.0).show_value(false).ui(ui).changed();
-                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::BLUE;
-                let z_changed = Slider::new(&mut self.id_mod[2], -1.0..=1.0).show_value(false).ui(ui).changed();
-
-                if x_changed || y_changed || z_changed {
-                    let _ = self.tx.send(UI2VR::UpdateIdentity(self.id_mod));
+            ui.scope(|ui| {
+                if self.runtime_failure.is_some() {
+                    ui.disable();
                 }
-            });
-            ui.horizontal(|ui| {
-                ui.spacing_mut().interact_size.x = (ui.available_width() - ui.spacing().item_spacing.x * 2.0) / 3.0;
-                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::RED;
-                let x_changed = DragValue::new(&mut self.id_mod[0]).range(-1.0..=1.0).ui(ui).changed();
-                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::GREEN;
-                let y_changed = DragValue::new(&mut self.id_mod[1]).range(-1.0..=1.0).ui(ui).changed();
-                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::BLUE;
-                let z_changed = DragValue::new(&mut self.id_mod[2]).range(-1.0..=1.0).ui(ui).changed();
-
-                if x_changed || y_changed || z_changed {
-                    let _ = self.tx.send(UI2VR::UpdateIdentity(self.id_mod));
-                }
-            });
-
-            ui.label("Current rotation: ");
-            let mut buffer: [[f32; 4]; 100] = [[0.0; 4]; 100];
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                let mut i = 0;
-                while i < self.graph.len() {
-                    buffer[i] = util::modifier(&self.graph[i], self.id_mod);
-                    i += 1;
-                }
-                self.graph3d.draw(&buffer, ui);
-                graph::graph(&self.graph, self.id_mod, ui, util::modifier);
-            });
-
-            ui.label("Gamepad output: ");
-            ui.add_sized(
-                vec2(ui.available_width(), ui.spacing().interact_size.y),
-                Slider::new(&mut self.stick_bounds.stick_deadzone, 0.0..=1.0).text("Deadzone"),
-            );
-            ui.add_sized(
-                vec2(ui.available_width(), ui.spacing().interact_size.y),
-                Slider::new(&mut self.stick_bounds.stick_max, 0.0..=1.0).text("Maximum"),
-            );
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                let mut i = 0;
-                while i < self.graph.len() {
-                    let tmp = util::modifier(&self.graph[i], self.id_mod);
-
-                    buffer[i] = [f32::sin(tmp[0]), f32::sin(-tmp[2]), -2.0, -2.0];
-                    i += 1;
-                }
-
-                let (rect, _) = ui
-                    .allocate_exact_size(egui::Vec2::splat(ui.spacing().interact_size.y * 10.0), egui::Sense::click());
-
-                ui.painter().circle(
-                    rect.center(),
-                    rect.width() / 2.0,
-                    Color32::BLACK,
-                    ui.visuals().noninteractive().bg_stroke,
-                );
-                ui.painter()
-                    .line_segment([rect.left_center(), rect.right_center()], ui.visuals().noninteractive().bg_stroke);
-                ui.painter()
-                    .line_segment([rect.center_top(), rect.center_bottom()], ui.visuals().noninteractive().bg_stroke);
-                ui.painter().circle(
-                    rect.center(),
-                    (rect.width() / 2.0) * self.stick_bounds.stick_deadzone,
-                    Color32::TRANSPARENT,
-                    Stroke::new(1.0, Color32::from_rgb(0, 128, 200)),
-                );
-                ui.painter().circle(
-                    rect.center(),
-                    (rect.width() / 2.0) * self.stick_bounds.stick_max,
-                    Color32::TRANSPARENT,
-                    Stroke::new(1.0, Color32::GOLD),
-                );
-                let plt_x = buffer[99][0] * rect.width() / 2.0;
-                let plt_y = 0.0 - buffer[99][1] * rect.width() / 2.0;
-                ui.painter().circle_filled(rect.center() + vec2(plt_x, plt_y), 4.0, Color32::WHITE);
-
-                graph::graph(&buffer, self.id_mod, ui, |a, _| *a);
+                self.main_content(ui);
             });
 
             profiling::finish_frame!();
         });
+
+        if let Some(failure) = &self.startup_failure {
+            self.render_failure(ctx, failure);
+        } else if let Some(failure) = &self.runtime_failure {
+            self.render_failure(ctx, failure);
+        }
     }
 
     fn on_exit(&mut self, _ctx: Option<&eframe::glow::Context>) {

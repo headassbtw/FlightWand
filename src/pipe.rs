@@ -24,21 +24,24 @@ pub enum UI2VR {
     Start(Hand),
     /// Updates the backend's knowledge of "up"
     UpdateIdentity([f32; 3]),
+    /// Updates the backend's knowledge of the stick bounds/parameters
+    UpdateBounds(VRInputBounds),
 }
 
 pub struct VRSystemInformation {
     pub system_properties: SystemProperties,
 }
 
+#[derive(Clone, Copy)]
 pub struct VRInputBounds {
     /// Minimum value to be outputted to the stick
-    pub stick_deadzone: f32,
+    pub deadzone: f32,
     /// Remaps `0..=stick_max` to `0.0..=1.0` for gamepad output
     pub stick_max: f32,
 }
 
 impl Default for VRInputBounds {
-    fn default() -> Self { Self { stick_deadzone: 0.1, stick_max: 0.85 } }
+    fn default() -> Self { Self { deadzone: 0.1, stick_max: 0.85 } }
 }
 
 pub enum VRSystemFailure {
