@@ -35,7 +35,10 @@ pub struct VRClient {}
 
 macro_rules! xr_unwrap {
     ($tx: expr, $result:expr) => {
-        match $result {
+        match {
+            profiling::scope!(stringify!($result));
+            $result
+        } {
             core::result::Result::Ok(val) => val,
             core::result::Result::Err(err) => {
                 let _ = $tx.send(VR2UI::Failure(VRSystemFailure::Generic(err)));
@@ -47,7 +50,10 @@ macro_rules! xr_unwrap {
 
 macro_rules! vk_unwrap {
     ($tx: expr, $result:expr) => {
-        match $result {
+        match {
+            profiling::scope!(stringify!($result));
+            $result
+        } {
             core::result::Result::Ok(val) => val,
             core::result::Result::Err(err) => {
                 let _ = $tx.send(VR2UI::Failure(VRSystemFailure::Vulkan(err)));
@@ -59,7 +65,10 @@ macro_rules! vk_unwrap {
 
 macro_rules! io_unwrap {
     ($tx: expr, $result:expr) => {
-        match $result {
+        match {
+            profiling::scope!(stringify!($result));
+            $result
+        } {
             core::result::Result::Ok(val) => val,
             core::result::Result::Err(err) => {
                 let _ = $tx.send(VR2UI::Failure(VRSystemFailure::VirtualGamepad(err)));
@@ -69,6 +78,7 @@ macro_rules! io_unwrap {
     };
 }
 
+#[profiling::function]
 fn bind_gamepad(axes: &[UinputAbsSetup], keys: &AttributeSetRef<KeyCode>) -> io::Result<VirtualDevice> {
     let mut device = VirtualDevice::builder()?.name("FlightWand Virtual Flight Stick");
     for axis in axes {
@@ -78,16 +88,20 @@ fn bind_gamepad(axes: &[UinputAbsSetup], keys: &AttributeSetRef<KeyCode>) -> io:
     device.with_keys(keys)?.build()
 }
 
+#[profiling::all_functions]
 impl VRClient {
     pub fn run(tx: std::sync::mpsc::Sender<VR2UI>, rx: std::sync::mpsc::Receiver<UI2VR>) {
-        tokio::task::spawn(async move {
-            VRClient::run1(tx, rx).await;
-        });
+        std::thread::Builder::new()
+            .name("VRClient".to_owned())
+            .spawn(|| {
+                VRClient::run_internal(tx, rx);
+            })
+            .expect("TODO: panic message");
     }
-    async fn run1(tx: std::sync::mpsc::Sender<VR2UI>, rx: std::sync::mpsc::Receiver<UI2VR>) {
-        let mut identity: [f32; 3] = [0.0; 3];
-        identity[2] = -1.0;
-        let abs_setup = AbsInfo::new(0, -100, 100, 0, 0, 200);
+
+    fn run_internal(tx: std::sync::mpsc::Sender<VR2UI>, rx: std::sync::mpsc::Receiver<UI2VR>) {
+        let mut identity: [f32; 3] = [-0.02, 0.61, -1.0];
+        let abs_setup = AbsInfo::new(0, -100, 100, 0, 0, 500);
 
         let axis_x = UinputAbsSetup::new(AbsoluteAxisCode::ABS_X, abs_setup);
         let axis_y = UinputAbsSetup::new(AbsoluteAxisCode::ABS_Y, abs_setup);
@@ -254,6 +268,7 @@ impl VRClient {
 
             let hand: &str;
             'wait_for_startup: loop {
+                profiling::scope!("VRClient::wait_for_startup");
                 while let Ok(msg) = rx.try_recv() {
                     match msg {
                         UI2VR::Start(chosen) => {
@@ -359,12 +374,27 @@ impl VRClient {
 
             // Main loop
             let mut swapchain = None;
+            let swapchain_create_info = xr::SwapchainCreateInfo {
+                create_flags: xr::SwapchainCreateFlags::EMPTY,
+                usage_flags: xr::SwapchainUsageFlags::COLOR_ATTACHMENT,
+                format: COLOR_FORMAT.as_raw() as _,
+                sample_count: 1,
+                width: 1,
+                height: 1,
+                face_count: 1,
+                array_size: VIEW_COUNT,
+                mip_count: 1,
+            };
+            let swapchain_handle = xr_unwrap!(tx, session.create_swapchain(&swapchain_create_info));
+
+            let swapchain = swapchain.get_or_insert_with(|| Swapchain { handle: swapchain_handle });
             let mut event_storage = xr::EventDataBuffer::new();
             let mut session_running = false;
             // Index of the current frame, wrapped by PIPELINE_DEPTH. Not to be confused with the
             // swapchain image index.
             let mut frame = 0;
             'main_loop: loop {
+                profiling::scope!("VRClient::main_loop");
                 if !running.load(Ordering::Relaxed) {
                     println!("requesting exit");
                     // The OpenXR runtime may want to perform a smooth transition between scenes, so we
@@ -373,11 +403,14 @@ impl VRClient {
                     match session.request_exit() {
                         Ok(()) => {}
                         Err(xr::sys::Result::ERROR_SESSION_NOT_RUNNING) => break,
-                        Err(e) => panic!("{}", e),
+                        Err(e) => {
+                            let _ = tx.send(VR2UI::Failure(VRSystemFailure::Generic(e)));
+                        }
                     }
                 }
 
                 while let Some(event) = xr_unwrap!(tx, xr_instance.poll_event(&mut event_storage)) {
+                    profiling::scope!("xr_instance.poll_event");
                     use xr::Event::*;
                     match event {
                         SessionStateChanged(e) => {
@@ -420,6 +453,7 @@ impl VRClient {
                 }
 
                 if !session_running {
+                    profiling::scope!("!session_running");
                     // Don't grind up the CPU
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
@@ -432,21 +466,6 @@ impl VRClient {
                     xr_unwrap!(tx, frame_stream.end(xr_frame_state.predicted_display_time, env_blend_mode, &[],));
                     continue;
                 }
-
-                let swapchain_create_info = xr::SwapchainCreateInfo {
-                    create_flags: xr::SwapchainCreateFlags::EMPTY,
-                    usage_flags: xr::SwapchainUsageFlags::COLOR_ATTACHMENT,
-                    format: COLOR_FORMAT.as_raw() as _,
-                    sample_count: 1,
-                    width: 1,
-                    height: 1,
-                    face_count: 1,
-                    array_size: VIEW_COUNT,
-                    mip_count: 1,
-                };
-                let swapchain_handle = xr_unwrap!(tx, session.create_swapchain(&swapchain_create_info));
-
-                let swapchain = swapchain.get_or_insert_with(|| Swapchain { handle: swapchain_handle });
 
                 // frame cleanup
                 let _image_index = xr_unwrap!(tx, swapchain.handle.acquire_image());
@@ -481,6 +500,7 @@ impl VRClient {
                 let menu = xr_unwrap!(tx, menu.state(&session, xr::Path::NULL));
 
                 if trackpad_x.is_active && trackpad_y.is_active && trackpad_click.is_active {
+                    profiling::scope!("Input processing");
                     let ang = f32::atan2(trackpad_x.current_state, trackpad_y.current_state) / std::f32::consts::PI;
                     let distance = f32::sqrt(
                         trackpad_x.current_state * trackpad_x.current_state
@@ -502,12 +522,15 @@ impl VRClient {
 
                     io_unwrap!(tx, device.emit(&[ev_north, ev_east, ev_west, ev_south, ev_start, ev_grip]));
 
-                    let mut rot = util::modifier(&[
-                        pose.pose.orientation.x,
-                        pose.pose.orientation.y,
-                        pose.pose.orientation.z,
-                        pose.pose.orientation.w,
-                    ], identity);
+                    let mut rot = util::modifier(
+                        &[
+                            pose.pose.orientation.x,
+                            pose.pose.orientation.y,
+                            pose.pose.orientation.z,
+                            pose.pose.orientation.w,
+                        ],
+                        identity,
+                    );
 
                     // rustfmt refuses to let me just "if bigger then big" so i have to set it! thanks!
                     rot[0] = if rot[0] > 1.0 { 1.0 } else { rot[0] };
@@ -515,11 +538,11 @@ impl VRClient {
                     rot[2] = if rot[2] > 1.0 { 1.0 } else { rot[2] };
                     rot[2] = if rot[2] < -1.0 { -1.0 } else { rot[2] };
 
-                    let ev_x = InputEvent::new(3, AbsoluteAxisCode::ABS_X.0, (rot[0] * 100.0) as i32);
-                    let ev_y = InputEvent::new(3, AbsoluteAxisCode::ABS_Y.0, (rot[2] * 100.0) as i32);
-                    let ev_t = InputEvent::new(3, AbsoluteAxisCode::ABS_GAS.0, (trigger.current_state * 100.0) as i32);
+                    let ev_x = InputEvent::new(3, AbsoluteAxisCode::ABS_X.0, (f32::sin(rot[0]) * 100.0) as i32);
+                    let ev_y = InputEvent::new(3, AbsoluteAxisCode::ABS_Y.0, (f32::sin(-rot[2]) * 100.0) as i32);
+                    let _ev_t = InputEvent::new(3, AbsoluteAxisCode::ABS_GAS.0, (trigger.current_state * 100.0) as i32);
 
-                    io_unwrap!(tx, device.emit(&[ev_x, ev_y, ev_t]));
+                    io_unwrap!(tx, device.emit(&[ev_x, ev_y]));
                 }
 
                 // Wait until the image is available to render to before beginning work on the GPU. The
@@ -563,6 +586,6 @@ impl VRClient {
             drop((session, frame_wait, frame_stream, stage, action_set, right_space, right_action));
         }
 
-        println!("exiting cleanly");
+        println!("VRClient shut down");
     }
 }

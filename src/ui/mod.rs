@@ -2,11 +2,11 @@ mod graph;
 mod graph3d;
 
 use crate::{
-    pipe::{self, UI2VR, VR2UI, VRSystemFailure},
+    pipe::{self, UI2VR, VR2UI, VRInputBounds, VRSystemFailure},
     ui::graph3d::Graph3D,
     util,
 };
-use eframe::emath::Align;
+use eframe::{emath::Align, epaint::Stroke};
 use egui::{
     Color32, FontData, FontDefinitions, FontFamily, Layout, TextStyle, Widget, vec2,
     widgets::{DragValue, Slider},
@@ -22,17 +22,19 @@ pub struct UI {
     startup_failure: Option<VRSystemFailure>,
     runtime_failure: Option<VRSystemFailure>,
     graph3d: Graph3D,
+    stick_bounds: VRInputBounds,
     graph: [[f32; 4]; 100],
     id_mod: [f32; 3],
 }
 
+#[profiling::all_functions]
 impl UI {
     pub fn new(
         tx: std::sync::mpsc::Sender<UI2VR>,
         rx: std::sync::mpsc::Receiver<VR2UI>,
         cc: &eframe::CreationContext,
     ) -> Self {
-        let mut id_mod = [0.0, 0.6, -1.0];
+        let id_mod = [0.0, 0.6, -1.0];
 
         cc.egui_ctx.style_mut(|style| {
             for (style, font) in &mut style.text_styles {
@@ -59,8 +61,9 @@ impl UI {
             system_properties: None,
             startup_failure: None,
             runtime_failure: None,
-            graph: [[0.0; 4]; 100],
             id_mod,
+            stick_bounds: VRInputBounds::default(),
+            graph: [[0.0; 4]; 100],
             graph3d: Graph3D::new(cc),
         }
     }
@@ -73,6 +76,7 @@ impl UI {
     }
 }
 
+#[profiling::all_functions]
 impl eframe::App for UI {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint();
@@ -184,6 +188,7 @@ impl eframe::App for UI {
                 }
             });
 
+            ui.label("Current rotation: ");
             let mut buffer: [[f32; 4]; 100] = [[0.0; 4]; 100];
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                 let mut i = 0;
@@ -194,8 +199,63 @@ impl eframe::App for UI {
                 self.graph3d.draw(&buffer, ui);
                 graph::graph(&self.graph, self.id_mod, ui, util::modifier);
             });
+
+            ui.label("Gamepad output: ");
+            ui.add_sized(
+                vec2(ui.available_width(), ui.spacing().interact_size.y),
+                Slider::new(&mut self.stick_bounds.stick_deadzone, 0.0..=1.0).text("Deadzone"),
+            );
+            ui.add_sized(
+                vec2(ui.available_width(), ui.spacing().interact_size.y),
+                Slider::new(&mut self.stick_bounds.stick_max, 0.0..=1.0).text("Maximum"),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                let mut i = 0;
+                while i < self.graph.len() {
+                    let tmp = util::modifier(&self.graph[i], self.id_mod);
+
+                    buffer[i] = [f32::sin(tmp[0]), f32::sin(-tmp[2]), -2.0, -2.0];
+                    i += 1;
+                }
+
+                let (rect, _) = ui
+                    .allocate_exact_size(egui::Vec2::splat(ui.spacing().interact_size.y * 10.0), egui::Sense::click());
+
+                ui.painter().circle(
+                    rect.center(),
+                    rect.width() / 2.0,
+                    Color32::BLACK,
+                    ui.visuals().noninteractive().bg_stroke,
+                );
+                ui.painter()
+                    .line_segment([rect.left_center(), rect.right_center()], ui.visuals().noninteractive().bg_stroke);
+                ui.painter()
+                    .line_segment([rect.center_top(), rect.center_bottom()], ui.visuals().noninteractive().bg_stroke);
+                ui.painter().circle(
+                    rect.center(),
+                    (rect.width() / 2.0) * self.stick_bounds.stick_deadzone,
+                    Color32::TRANSPARENT,
+                    Stroke::new(1.0, Color32::from_rgb(0, 128, 200)),
+                );
+                ui.painter().circle(
+                    rect.center(),
+                    (rect.width() / 2.0) * self.stick_bounds.stick_max,
+                    Color32::TRANSPARENT,
+                    Stroke::new(1.0, Color32::GOLD),
+                );
+                let plt_x = buffer[99][0] * rect.width() / 2.0;
+                let plt_y = 0.0 - buffer[99][1] * rect.width() / 2.0;
+                ui.painter().circle_filled(rect.center() + vec2(plt_x, plt_y), 4.0, Color32::WHITE);
+
+                graph::graph(&buffer, self.id_mod, ui, |a, _| *a);
+            });
+
+            profiling::finish_frame!();
         });
     }
 
-    fn on_exit(&mut self, _ctx: Option<&eframe::glow::Context>) { let _ = self.tx.send(UI2VR::Shutdown); }
+    fn on_exit(&mut self, _ctx: Option<&eframe::glow::Context>) {
+        let _ = self.tx.send(UI2VR::Shutdown);
+        println!("Frontend shut down");
+    }
 }

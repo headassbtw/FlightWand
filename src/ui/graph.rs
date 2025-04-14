@@ -1,7 +1,12 @@
 use eframe::epaint::{Color32, Rounding, Stroke};
 use egui::{pos2, vec2};
 
-pub fn graph(items: &[[f32; 4]], up: [f32; 3], ui: &mut egui::Ui, modifier: impl Fn(&[f32; 4], [f32; 3]) -> [f32; 4]) -> egui::Response {
+pub fn graph(
+    items: &[[f32; 4]],
+    up: [f32; 3],
+    ui: &mut egui::Ui,
+    modifier: impl Fn(&[f32; 4], [f32; 3]) -> [f32; 4],
+) -> egui::Response {
     let height = ui.spacing().interact_size.y * 10.0;
 
     let (rect, response) =
@@ -11,8 +16,11 @@ pub fn graph(items: &[[f32; 4]], up: [f32; 3], ui: &mut egui::Ui, modifier: impl
     let height = height - (ui.visuals().noninteractive().bg_stroke.width * 2.0);
     let adv = rect.width() / (items.len() - 1) as f32;
 
-    ui.painter().rect_filled(response.rect, Rounding::ZERO, Color32::BLACK);
-    ui.painter().line_segment([rect.left_center(), rect.right_center()], Stroke::new(2.0, Color32::GRAY));
+    // this limits the rect the graph can draw out, so outrageously big values don't go outside of it
+    let painter = ui.painter_at(rect);
+
+    painter.rect_filled(response.rect, Rounding::ZERO, Color32::BLACK);
+    painter.line_segment([rect.left_center(), rect.right_center()], Stroke::new(2.0, Color32::GRAY));
 
     let mut i: usize = 1;
     while i < items.len() {
@@ -32,10 +40,10 @@ pub fn graph(items: &[[f32; 4]], up: [f32; 3], ui: &mut egui::Ui, modifier: impl
         let right = rect.min.x + adv * (i as f32);
 
         let min = rect.min.y;
-        ui.painter().line_segment([pos2(left, min + x0), pos2(right, min + x1)], Stroke::new(2.0, Color32::RED));
-        ui.painter().line_segment([pos2(left, min + y0), pos2(right, min + y1)], Stroke::new(2.0, Color32::GREEN));
-        ui.painter().line_segment([pos2(left, min + z0), pos2(right, min + z1)], Stroke::new(2.0, Color32::BLUE));
-        ui.painter().line_segment([pos2(left, min + w0), pos2(right, min + w1)], Stroke::new(2.0, Color32::YELLOW));
+        painter.line_segment([pos2(left, min + x0), pos2(right, min + x1)], Stroke::new(2.0, Color32::RED));
+        painter.line_segment([pos2(left, min + y0), pos2(right, min + y1)], Stroke::new(2.0, Color32::GREEN));
+        painter.line_segment([pos2(left, min + z0), pos2(right, min + z1)], Stroke::new(2.0, Color32::BLUE));
+        painter.line_segment([pos2(left, min + w0), pos2(right, min + w1)], Stroke::new(2.0, Color32::YELLOW));
 
         i += 1;
     }

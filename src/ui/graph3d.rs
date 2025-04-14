@@ -172,7 +172,7 @@ impl GFX {
 }
 
 impl Graph3D {
-    pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Self { Self { gfx: GFX::new(cc), angle: (0.0, 0.0) } }
+    pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Self { Self { gfx: GFX::new(cc), angle: (0.7, 0.3) } }
 
     pub fn draw(&mut self, buffer: &[[f32; 4]; 100], ui: &mut egui::Ui) {
         let (rect, response) =
